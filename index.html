@@ -317,7 +317,7 @@ async function processOne(file) {
   if (bitmap.close) bitmap.close();
 
   // 3. 좌하단 밝기를 재서 검정/흰색 선택
-  const fontSize = Math.max(20, Math.round(canvas.width * 0.045));
+  const fontSize = Math.max(24, Math.round(canvas.width * 0.06));
   const lineHeight = Math.round(fontSize * 1.35);
   const pad = Math.round(canvas.width * 0.055);
   ctx.font = `700 ${fontSize}px -apple-system, "Malgun Gothic", "Segoe UI", sans-serif`;
