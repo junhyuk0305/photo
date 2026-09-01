@@ -331,11 +331,38 @@ async function processOne(file) {
   return { file: out, fallback };
 }
 
-function loadImage(file) {
+async function loadImage(file) {
+  // 1차: 브라우저 네이티브 디코딩
   if (window.createImageBitmap) {
-    return createImageBitmap(file).catch(() => loadImageTag(file));
+    try { return await createImageBitmap(file); } catch (e) {}
   }
-  return loadImageTag(file);
+  try { return await loadImageTag(file); } catch (e) {}
+  // 2차: HEIC 등 미지원 포맷 → wasm 라이브러리로 JPEG 변환 후 디코딩
+  const jpg = await heicToJpeg(file);
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(jpg); } catch (e) {}
+  }
+  return loadImageTag(jpg);
+}
+
+let heicLibPromise = null;
+function loadHeicLib() {
+  if (!heicLibPromise) {
+    heicLibPromise = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('HEIC 변환 라이브러리 로드 실패'));
+      document.head.appendChild(s);
+    });
+  }
+  return heicLibPromise;
+}
+
+async function heicToJpeg(file) {
+  await loadHeicLib();
+  const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.95 });
+  return Array.isArray(out) ? out[0] : out;
 }
 
 function loadImageTag(file) {
