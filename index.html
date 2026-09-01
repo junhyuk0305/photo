@@ -145,6 +145,29 @@
     color: #fff; font-size: 11px; font-weight: 500;
     padding: 4px 9px; border-radius: 7px; text-decoration: none;
   }
+  .cell button.del {
+    position: absolute; top: 5px; right: 5px; width: 26px; height: 26px;
+    border: none; border-radius: 50%; cursor: pointer;
+    background: rgba(28,25,23,0.62); backdrop-filter: blur(3px);
+    color: #fff; font-size: 14px; line-height: 1; padding: 0;
+  }
+
+  /* ── 모달 ── */
+  .modal {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: rgba(20,17,15,0.93);
+    align-items: center; justify-content: center; padding: 18px;
+  }
+  .modal.open { display: flex; }
+  .modal img {
+    max-width: 100%; max-height: 86vh; border-radius: 10px;
+    animation: pop 0.22s ease both;
+  }
+  .modal .close {
+    position: absolute; top: 12px; right: 16px;
+    background: none; border: none; color: #fff;
+    font-size: 32px; line-height: 1; cursor: pointer;
+  }
 
   footer {
     margin-top: 34px; padding-top: 16px; border-top: 1px solid var(--line);
@@ -174,7 +197,7 @@
     <p class="digits" id="demoDigits">2026-09-01 14:32</p>
   </div>
 
-  <input type="file" id="fileInput" multiple accept="image/*">
+  <input type="file" id="fileInput" multiple accept="image/*,image/heic,image/heif">
   <button class="btn btn-pick" id="pickBtn">📷&ensp;사진 선택하기</button>
   <button class="btn btn-save" id="saveBtn" disabled>앨범에 저장</button>
   <div id="status"></div>
@@ -183,7 +206,12 @@
 
   <footer>모든 처리는 이 브라우저 안에서만 이루어집니다.<br>서버 저장 · 전송 없음</footer>
 
-<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.umd.js"></script>
+  <div class="modal" id="modal">
+    <button class="close" aria-label="닫기">×</button>
+    <img id="modalImg" alt="미리보기">
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
 <script>
 const fileInput = document.getElementById('fileInput');
 const pickBtn = document.getElementById('pickBtn');
@@ -212,22 +240,31 @@ fileInput.onchange = async () => {
   pickBtn.disabled = true;
   statusEl.classList.remove('done');
 
-  let hasFallback = false;
-  for (let i = 0; i < files.length; i++) {
-    statusEl.textContent = `처리 중... ${i + 1} / ${files.length}`;
-    try {
-      const r = await processOne(files[i]);
-      results.push(r);
-      if (r.fallback) hasFallback = true;
-      addThumb(r);
-    } catch (e) {
-      console.error(files[i].name, e);
-      statusEl.textContent = `${files[i].name} 처리 실패 (지원하지 않는 형식일 수 있습니다)`;
-      await new Promise(res => setTimeout(res, 800));
+  // 4장씩 동시 처리
+  let hasFallback = false, done = 0;
+  const failed = [];
+  const queue = files.slice();
+  statusEl.textContent = `처리 중... 0 / ${files.length}`;
+  const worker = async () => {
+    while (queue.length) {
+      const f = queue.shift();
+      try {
+        const r = await processOne(f);
+        results.push(r);
+        if (r.fallback) hasFallback = true;
+        addThumb(r);
+      } catch (e) {
+        console.error(f.name, e);
+        failed.push(f.name);
+      }
+      done++;
+      statusEl.textContent = `처리 중... ${done} / ${files.length}`;
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
 
-  statusEl.textContent = `완료 · ${results.length}장`;
+  statusEl.textContent = `완료 · ${results.length}장` +
+    (failed.length ? ` (실패 ${failed.length}장: ${failed.join(', ')})` : '');
   statusEl.classList.add('done');
   if (hasFallback) notice.style.display = 'block';
   saveBtn.disabled = results.length === 0;
@@ -235,13 +272,17 @@ fileInput.onchange = async () => {
   fileInput.value = '';
 };
 
-async function processOne(file) {
-  // 1. 촬영 시간 읽기 (없으면 파일 시각으로 대체)
-  let date = null, fallback = false;
+async function readDate(file) {
   try {
     const exif = await exifr.parse(file, ['DateTimeOriginal', 'CreateDate']);
-    date = exif && (exif.DateTimeOriginal || exif.CreateDate) || null;
-  } catch (e) { /* EXIF 파싱 실패 → 대체 */ }
+    return exif && (exif.DateTimeOriginal || exif.CreateDate) || null;
+  } catch (e) { return null; }
+}
+
+async function processOne(file) {
+  // 1. EXIF 읽기와 이미지 디코딩을 동시에
+  let [date, bitmap] = await Promise.all([readDate(file), loadImage(file)]);
+  let fallback = false;
   if (!(date instanceof Date) || isNaN(date)) {
     date = new Date(file.lastModified);
     fallback = true;
@@ -249,7 +290,6 @@ async function processOne(file) {
   const lines = fmtLines(date);
 
   // 2. 캔버스에 그리기
-  const bitmap = await loadImage(file);
   const canvas = document.createElement('canvas');
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
@@ -323,8 +363,10 @@ function fmtLines(d) {
 function addThumb(r) {
   const cell = document.createElement('div');
   cell.className = 'cell';
+  r.url = URL.createObjectURL(r.file);
   const img = document.createElement('img');
-  img.src = URL.createObjectURL(r.file);
+  img.src = r.url;
+  img.onclick = () => openModal(r);
   cell.appendChild(img);
   if (r.fallback) {
     const b = document.createElement('span');
@@ -332,14 +374,34 @@ function addThumb(r) {
     b.textContent = '파일 시각';
     cell.appendChild(b);
   }
+  const del = document.createElement('button');
+  del.className = 'del';
+  del.textContent = '×';
+  del.setAttribute('aria-label', '삭제');
+  del.onclick = () => {
+    results = results.filter(x => x !== r);
+    URL.revokeObjectURL(r.url);
+    cell.remove();
+    saveBtn.disabled = results.length === 0;
+    statusEl.textContent = `${results.length}장 준비됨`;
+  };
+  cell.appendChild(del);
   const a = document.createElement('a');
   a.className = 'dl';
   a.textContent = '저장';
-  a.href = img.src;
+  a.href = r.url;
   a.download = r.file.name;
   cell.appendChild(a);
   grid.appendChild(cell);
 }
+
+const modal = document.getElementById('modal');
+const modalImg = document.getElementById('modalImg');
+function openModal(r) {
+  modalImg.src = r.url;
+  modal.classList.add('open');
+}
+modal.onclick = () => modal.classList.remove('open');
 
 saveBtn.onclick = async () => {
   const files = results.map(r => r.file);
