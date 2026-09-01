@@ -6,7 +6,7 @@
 <title>사진 시간 새기기</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Nanum+Pen+Script&family=Nanum+Brush+Script&family=Jua&family=Black+Han+Sans&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
   :root {
     --paper: #faf6ef;
@@ -110,6 +110,31 @@
   .btn-save:active { background: var(--red-deep); }
   .btn:disabled { opacity: 0.35; pointer-events: none; }
 
+  /* ── 스탬프 설정 ── */
+  .opts {
+    background: #fff; border: 1px solid var(--line); border-radius: 13px;
+    padding: 14px 16px; margin-bottom: 10px;
+    animation: rise 0.6s 0.35s ease both;
+  }
+  .opt-row { display: flex; align-items: center; gap: 12px; }
+  .opt-row + .opt-row { margin-top: 10px; }
+  .opt-label {
+    font-size: 12px; font-weight: 600; color: var(--ink-soft);
+    width: 30px; flex-shrink: 0;
+  }
+  .seg { display: flex; gap: 5px; flex: 1; }
+  .seg-wrap { flex-wrap: wrap; }
+  .seg-wrap button { flex: 1 1 30%; }
+  .seg button {
+    flex: 1; padding: 7px 0; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--paper); color: var(--ink-soft);
+    font-family: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  .seg button.on {
+    background: var(--red); border-color: var(--red); color: #fff; font-weight: 600;
+  }
+
   /* ── 상태 · 안내 ── */
   #status {
     font-size: 13.5px; color: var(--ink-soft); min-height: 20px;
@@ -207,6 +232,32 @@
     <p class="digits" id="demoDigits">2026-09-01 14:32</p>
   </div>
 
+  <div class="opts">
+    <div class="opt-row">
+      <span class="opt-label">위치</span>
+      <div class="seg" data-key="pos">
+        <button data-v="lb">좌하</button><button data-v="rb">우하</button><button data-v="lt">좌상</button><button data-v="rt">우상</button>
+      </div>
+    </div>
+    <div class="opt-row">
+      <span class="opt-label">크기</span>
+      <div class="seg" data-key="size">
+        <button data-v="s">작게</button><button data-v="m">보통</button><button data-v="l">크게</button><button data-v="xl">매우 크게</button>
+      </div>
+    </div>
+    <div class="opt-row">
+      <span class="opt-label">폰트</span>
+      <div class="seg seg-wrap" data-key="font">
+        <button data-v="gothic" style="font-weight:700">고딕</button>
+        <button data-v="serif" style="font-family:'Gowun Batang',serif;font-weight:700">명조</button>
+        <button data-v="hand" style="font-family:'Nanum Pen Script',cursive;font-size:15px">손글씨</button>
+        <button data-v="brush" style="font-family:'Nanum Brush Script',cursive;font-size:15px">붓글씨</button>
+        <button data-v="jua" style="font-family:'Jua',sans-serif">주아</button>
+        <button data-v="black" style="font-family:'Black Han Sans',sans-serif">검은고딕</button>
+      </div>
+    </div>
+  </div>
+
   <input type="file" id="fileInput" multiple accept="image/*,image/heic,image/heif,.heic,.heif">
   <button class="btn btn-pick" id="pickBtn">📷&ensp;사진 선택하기</button>
   <button class="btn btn-save" id="saveBtn" disabled>앨범에 저장</button>
@@ -241,23 +292,75 @@ const notice = document.getElementById('notice');
 
 document.getElementById('demoDigits').innerHTML = fmtLines(new Date()).join('<br>');
 
-let results = []; // { file: File, fallback: boolean }
+// ── 스탬프 설정 (기기에 저장) ──
+const SIZE = { s: 0.045, m: 0.06, l: 0.075, xl: 0.095 };
+let settings = { pos: 'lb', size: 'm', font: 'gothic' };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('stampSettings') || '{}')); } catch (e) {}
+
+const FONTS = {
+  gothic: { family: '-apple-system, "Malgun Gothic", "Segoe UI", sans-serif', weight: 700, scale: 1 },
+  serif:  { family: '"Gowun Batang", serif', weight: 700, scale: 1 },
+  hand:   { family: '"Nanum Pen Script", cursive', weight: 400, scale: 1.25 },
+  brush:  { family: '"Nanum Brush Script", cursive', weight: 400, scale: 1.25 },
+  jua:    { family: '"Jua", sans-serif', weight: 400, scale: 1 },
+  black:  { family: '"Black Han Sans", sans-serif', weight: 400, scale: 1 },
+};
+
+function fontSpec(fs) {
+  const f = FONTS[settings.font] || FONTS.gothic;
+  return `${f.weight} ${Math.round(fs * f.scale)}px ${f.family}`;
+}
+
+function applyDemoFont() {
+  const f = FONTS[settings.font];
+  document.getElementById('demoDigits').style.fontFamily =
+    settings.font === 'gothic' ? '"Share Tech Mono", "IBM Plex Sans KR", monospace' : f.family;
+}
+applyDemoFont();
+
+document.querySelectorAll('.seg').forEach(seg => {
+  const key = seg.dataset.key;
+  Array.from(seg.children).forEach(btn => {
+    if (btn.dataset.v === settings[key]) btn.classList.add('on');
+    btn.onclick = () => {
+      if (processing) return;
+      settings[key] = btn.dataset.v;
+      Array.from(seg.children).forEach(b => b.classList.toggle('on', b === btn));
+      try { localStorage.setItem('stampSettings', JSON.stringify(settings)); } catch (e) {}
+      applyDemoFont();
+      if (srcFiles.length) runProcess(srcFiles.slice()); // 이미 올린 사진에 즉시 재적용
+    };
+  });
+});
+
+let results = []; // { file: File, fallback: boolean, src: File }
+let srcFiles = [];
+let processing = false;
 
 pickBtn.onclick = () => fileInput.click();
 
-fileInput.onchange = async () => {
+fileInput.onchange = () => {
   let files = Array.from(fileInput.files);
   if (files.length === 0) return;
   if (files.length > 50) {
     files = files.slice(0, 50);
     alert('최대 50장까지만 처리합니다. 앞의 50장만 사용합니다.');
   }
+  srcFiles = files;
+  runProcess(files);
+  fileInput.value = '';
+};
+
+async function runProcess(files) {
+  processing = true;
+  results.forEach(r => r.url && URL.revokeObjectURL(r.url));
   results = [];
   grid.innerHTML = '';
   notice.style.display = 'none';
   saveBtn.disabled = true;
   pickBtn.disabled = true;
   statusEl.classList.remove('done');
+  try { await document.fonts.load(fontSpec(30), '2026년 9월 1일 (화) 오후 9:01'); } catch (e) {}
 
   // 4장씩 동시 처리
   let hasFallback = false, done = 0;
@@ -269,6 +372,7 @@ fileInput.onchange = async () => {
       const f = queue.shift();
       try {
         const r = await processOne(f);
+        r.src = f;
         results.push(r);
         if (r.fallback) hasFallback = true;
         addThumb(r);
@@ -288,8 +392,8 @@ fileInput.onchange = async () => {
   if (hasFallback) notice.style.display = 'block';
   saveBtn.disabled = results.length === 0;
   pickBtn.disabled = false;
-  fileInput.value = '';
-};
+  processing = false;
+}
 
 async function readDate(file) {
   try {
@@ -316,16 +420,19 @@ async function processOne(file) {
   ctx.drawImage(bitmap, 0, 0);
   if (bitmap.close) bitmap.close();
 
-  // 3. 좌하단 밝기를 재서 검정/흰색 선택
-  const fontSize = Math.max(24, Math.round(canvas.width * 0.06));
+  // 3. 스탬프가 놓일 구석의 밝기를 재서 검정/흰색 선택
+  const posLeft = settings.pos[0] === 'l';
+  const posTop = settings.pos[1] === 't';
+  const fontSize = Math.max(18, Math.round(canvas.width * (SIZE[settings.size] || SIZE.m)));
   const lineHeight = Math.round(fontSize * 1.35);
   const pad = Math.round(canvas.width * 0.055);
-  ctx.font = `700 ${fontSize}px -apple-system, "Malgun Gothic", "Segoe UI", sans-serif`;
+  ctx.font = fontSpec(fontSize);
   const tw = Math.max(ctx.measureText(lines[0]).width, ctx.measureText(lines[1]).width);
   const sw = Math.min(canvas.width, tw + pad * 2);
   const sh = Math.min(canvas.height, lineHeight * 2 + pad * 2);
-  const sy = canvas.height - sh;
-  const sample = ctx.getImageData(0, sy, sw, sh).data;
+  const sx = posLeft ? 0 : canvas.width - sw;
+  const sy = posTop ? 0 : canvas.height - sh;
+  const sample = ctx.getImageData(sx, sy, sw, sh).data;
   let lum = 0, n = 0;
   for (let i = 0; i < sample.length; i += 16) { // 4픽셀 간격 샘플링
     lum += 0.299 * sample[i] + 0.587 * sample[i + 1] + 0.114 * sample[i + 2];
@@ -338,10 +445,17 @@ async function processOne(file) {
   ctx.shadowColor = bright ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = fontSize * 0.2;
   ctx.shadowOffsetY = fontSize * 0.04;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(lines[0], pad, canvas.height - pad - lineHeight);
-  ctx.fillText(lines[1], pad, canvas.height - pad);
+  ctx.textAlign = posLeft ? 'left' : 'right';
+  const x = posLeft ? pad : canvas.width - pad;
+  if (posTop) {
+    ctx.textBaseline = 'top';
+    ctx.fillText(lines[0], x, pad);
+    ctx.fillText(lines[1], x, pad + lineHeight);
+  } else {
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(lines[0], x, canvas.height - pad - lineHeight);
+    ctx.fillText(lines[1], x, canvas.height - pad);
+  }
 
   // 5. JPEG로 내보내기
   const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
@@ -426,6 +540,7 @@ function addThumb(r) {
   del.setAttribute('aria-label', '삭제');
   del.onclick = () => {
     results = results.filter(x => x !== r);
+    srcFiles = srcFiles.filter(f => f !== r.src);
     URL.revokeObjectURL(r.url);
     cell.remove();
     saveBtn.disabled = results.length === 0;
